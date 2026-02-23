@@ -5,7 +5,8 @@ import streamlit as st
 
 st.set_page_config(page_title="NBA Team Performance Dashboard", layout="wide")
 
-DATA_PATH = "data/processed/games_tidy.csv"
+DATA_PATH = "data/games.csv"
+# DATA_PATH = "data/processed/games_tidy.csv"
 
 @st.cache_data
 def load_data(path: str) -> pd.DataFrame:
