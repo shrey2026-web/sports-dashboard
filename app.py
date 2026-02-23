@@ -269,5 +269,4 @@ with tab2:
 # ------------------------------------------------------------
 st.caption(
     "Data source and update procedure are documented in README.md. "
-    "To refresh, replace data/games.csv with the latest download and push to GitHub (Streamlit will redeploy)."
 )
