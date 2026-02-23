@@ -4,11 +4,55 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+# ------------------------------------------------------------
+# Page config
+# ------------------------------------------------------------
 st.set_page_config(page_title="NBA Performance Dashboard", layout="wide")
 
+# ------------------------------------------------------------
+# Data path (must match your repo)
+# ------------------------------------------------------------
 DATA_PATH = "data/games.csv"
 
+# ------------------------------------------------------------
+# Team ID -> Team Name mapping (fixes ugly "1.6106B" labels)
+# ------------------------------------------------------------
+TEAM_ID_TO_NAME = {
+    1610612737: "Atlanta Hawks",
+    1610612738: "Boston Celtics",
+    1610612739: "Cleveland Cavaliers",
+    1610612740: "New Orleans Pelicans",
+    1610612741: "Chicago Bulls",
+    1610612742: "Dallas Mavericks",
+    1610612743: "Denver Nuggets",
+    1610612744: "Golden State Warriors",
+    1610612745: "Houston Rockets",
+    1610612746: "LA Clippers",
+    1610612747: "Los Angeles Lakers",
+    1610612748: "Miami Heat",
+    1610612749: "Milwaukee Bucks",
+    1610612750: "Minnesota Timberwolves",
+    1610612751: "Brooklyn Nets",
+    1610612752: "New York Knicks",
+    1610612753: "Orlando Magic",
+    1610612754: "Indiana Pacers",
+    1610612755: "Philadelphia 76ers",
+    1610612756: "Phoenix Suns",
+    1610612757: "Portland Trail Blazers",
+    1610612758: "Sacramento Kings",
+    1610612759: "San Antonio Spurs",
+    1610612760: "Oklahoma City Thunder",
+    1610612761: "Toronto Raptors",
+    1610612762: "Utah Jazz",
+    1610612763: "Memphis Grizzlies",
+    1610612764: "Washington Wizards",
+    1610612765: "Detroit Pistons",
+    1610612766: "Charlotte Hornets",
+}
 
+# ------------------------------------------------------------
+# Load + reshape (Kaggle NBA games.csv)
+# ------------------------------------------------------------
 @st.cache_data
 def load_and_tidy(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
@@ -21,24 +65,25 @@ def load_and_tidy(path: str) -> pd.DataFrame:
 
     df = pd.read_csv(path)
 
-    # Create standard date
+    # Validate expected column
     if "GAME_DATE_EST" not in df.columns:
-        st.error("Expected column GAME_DATE_EST not found. Check that this is the Kaggle NBA games.csv file.")
+        st.error("Expected column GAME_DATE_EST not found. Make sure you uploaded the Kaggle nba-games games.csv.")
         st.write("Detected columns:", list(df.columns))
         st.stop()
 
+    # Parse date
     df["date"] = pd.to_datetime(df["GAME_DATE_EST"], errors="coerce")
 
-    # Keep only completed games if available
+    # Keep only completed games if column exists
     if "GAME_STATUS_TEXT" in df.columns:
         df = df[df["GAME_STATUS_TEXT"].astype(str).str.lower().eq("final")].copy()
 
-    required = {"HOME_TEAM_ID", "VISITOR_TEAM_ID", "PTS_home", "PTS_away"}
-    if not required.issubset(df.columns):
-        st.error("Expected home/away score columns not found. Check dataset schema.")
+    needed = {"HOME_TEAM_ID", "VISITOR_TEAM_ID", "PTS_home", "PTS_away"}
+    if not needed.issubset(df.columns):
+        st.error("Expected home/away columns not found. Dataset schema does not match.")
         st.stop()
 
-    # Build tidy team-game rows
+    # HOME rows
     home = pd.DataFrame({
         "date": df["date"],
         "season": df.get("SEASON"),
@@ -50,9 +95,12 @@ def load_and_tidy(path: str) -> pd.DataFrame:
         "fg_pct": df.get("FG_PCT_home"),
         "fg3_pct": df.get("FG3_PCT_home"),
         "ft_pct": df.get("FT_PCT_home"),
+        "ast": df.get("AST_home"),
+        "reb": df.get("REB_home"),
         "win": df.get("HOME_TEAM_WINS"),
     })
 
+    # AWAY rows
     away = pd.DataFrame({
         "date": df["date"],
         "season": df.get("SEASON"),
@@ -64,14 +112,19 @@ def load_and_tidy(path: str) -> pd.DataFrame:
         "fg_pct": df.get("FG_PCT_away"),
         "fg3_pct": df.get("FG3_PCT_away"),
         "ft_pct": df.get("FT_PCT_away"),
+        "ast": df.get("AST_away"),
+        "reb": df.get("REB_away"),
         "win": (1 - df["HOME_TEAM_WINS"]) if "HOME_TEAM_WINS" in df.columns else np.nan,
     })
 
     tidy = pd.concat([home, away], ignore_index=True)
     tidy = tidy.dropna(subset=["date", "points", "opp_points"])
 
-    tidy["team"] = tidy["team_id"].astype(str)
-    tidy["opponent"] = tidy["opponent_id"].astype(str)
+    # Map IDs to names (THIS fixes your ugly x-axis labels)
+    tidy["team"] = tidy["team_id"].map(TEAM_ID_TO_NAME).fillna(tidy["team_id"].astype(str))
+    tidy["opponent"] = tidy["opponent_id"].map(TEAM_ID_TO_NAME).fillna(tidy["opponent_id"].astype(str))
+
+    # Derived metrics
     tidy["point_diff"] = tidy["points"] - tidy["opp_points"]
     tidy["month"] = tidy["date"].dt.to_period("M").astype(str)
 
@@ -81,7 +134,7 @@ def load_and_tidy(path: str) -> pd.DataFrame:
 df = load_and_tidy(DATA_PATH)
 
 # ------------------------------------------------------------
-# Analytical objective (explicit requirement)
+# Objective (rubric requirement)
 # ------------------------------------------------------------
 st.title("NBA Team Performance Dashboard")
 st.markdown(
@@ -91,12 +144,12 @@ st.markdown(
 )
 
 # ------------------------------------------------------------
-# Dashboard elements (>=3): dropdowns, date range, slider, metrics
+# Sidebar controls (>=3 dashboard elements)
 # ------------------------------------------------------------
 st.sidebar.header("Controls")
 
 teams = sorted(df["team"].unique())
-team = st.sidebar.selectbox("Team (ID)", teams, index=0)
+team = st.sidebar.selectbox("Team", teams, index=0)
 
 df_t = df[df["team"] == team].copy()
 
@@ -116,7 +169,9 @@ df_t = df_t[(df_t["date"] >= start_d) & (df_t["date"] <= end_d)].copy()
 
 rolling = st.sidebar.slider("Rolling window (games)", 1, 15, 5)
 
+# ------------------------------------------------------------
 # KPI metric cards
+# ------------------------------------------------------------
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Games", int(len(df_t)))
 k2.metric("Avg Points", f"{df_t['points'].mean():.1f}")
@@ -124,28 +179,25 @@ k3.metric("Avg FG%", f"{df_t['fg_pct'].mean():.3f}" if df_t["fg_pct"].notna().an
 k4.metric("Win %", f"{df_t['win'].mean() * 100:.1f}%" if df_t["win"].notna().any() else "N/A")
 
 # ------------------------------------------------------------
-# Tabs (>=2) with distinct purposes
+# Tabs (>=2) with distinct purpose
 # ------------------------------------------------------------
 tab1, tab2 = st.tabs(["Overview & Efficiency", "Matchups & Consistency"])
 
-# ---------------------------
-# TAB 1: Overview & Efficiency
-# Chart types used here: LINE + SCATTER
-# ---------------------------
+# ------------------------------------------------------------
+# TAB 1: Line + Scatter
+# ------------------------------------------------------------
 with tab1:
     st.subheader("Scoring Trend and Efficiency Relationship")
 
     d = df_t.sort_values("date").copy()
     d["points_roll"] = d["points"].rolling(rolling, min_periods=1).mean()
 
-    # Chart type 1: Line chart
     fig_line = px.line(
         d, x="date", y=["points", "points_roll"],
         title="Points Over Time with Rolling Average"
     )
     st.plotly_chart(fig_line, use_container_width=True)
 
-    # Chart type 2: Scatter plot
     fig_scatter = px.scatter(
         d, x="fg_pct", y="points",
         color="home_away",
@@ -164,14 +216,12 @@ with tab1:
         "games where scoring deviated from what shooting efficiency alone would predict, and those games are candidates for deeper review."
     )
 
-# ---------------------------
-# TAB 2: Matchups & Consistency
-# Chart types used here: BAR + HEATMAP + HISTOGRAM
-# ---------------------------
+# ------------------------------------------------------------
+# TAB 2: Bar + Heatmap + Histogram
+# ------------------------------------------------------------
 with tab2:
     st.subheader("Opponent Matchups and Outcome Stability")
 
-    # Chart type 3: Bar chart
     matchup = (df_t.groupby("opponent")["point_diff"]
                .mean()
                .sort_values(ascending=False)
@@ -183,9 +233,9 @@ with tab2:
         y="avg_point_diff",
         title="Top 10 Opponents by Average Point Differential"
     )
+    fig_bar.update_xaxes(type="category", tickangle=-35)
     st.plotly_chart(fig_bar, use_container_width=True)
 
-    # Chart type 4: Heatmap
     pivot = pd.pivot_table(df_t, index="month", columns="opponent", values="points", aggfunc="mean")
     if pivot.shape[1] > 12:
         top_opps = df_t["opponent"].value_counts().head(12).index
@@ -198,7 +248,6 @@ with tab2:
     )
     st.plotly_chart(fig_heat, use_container_width=True)
 
-    # Chart type 5: Histogram (extra, still distinct)
     fig_hist = px.histogram(
         df_t, x="point_diff", nbins=30,
         title="Distribution of Point Differential"
@@ -215,4 +264,10 @@ with tab2:
         "where performance is sustainable and where matchup-specific interventions could be most impactful."
     )
 
-st.caption("Data source and update procedure are documented in README.md. Replace data/games.csv with an updated download to refresh the dashboard.")
+# ------------------------------------------------------------
+# Footer
+# ------------------------------------------------------------
+st.caption(
+    "Data source and update procedure are documented in README.md. "
+    "To refresh, replace data/games.csv with the latest download and push to GitHub (Streamlit will redeploy)."
+)
